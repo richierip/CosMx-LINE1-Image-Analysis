@@ -1,5 +1,5 @@
 '''
-Compare nuclear intensity vs LINE1 transcripts per cell, run correlation / regression
+Compare nuclear intensity vs LINE1 transcripts per cell, run correlation / regression / whatever else
     This file takes in a curated data table and makes a plot
 Peter Richieri 
 MGH Ting Lab 
@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import sys
 
-custom_data_path = r"..\DAPI_Intensity_by_Cell.csv"
+custom_data_path = r"..\CosMx_C4_CellResults_glcmFeats_d=5_directionallyInvariant_8bit.csv"
 
 def bin_by_dapi(df, norm_by_area=False):
     def _calc_norm_area(row):
@@ -58,6 +58,12 @@ def bin_by_dapi(df, norm_by_area=False):
     df.to_csv(custom_data_path, index=False)
     return df
 
+def make_column(row):
+    if row['Cell type'] in ['CAF','macrophage','cancer','T.cell','Vascular.smooth.muscle']:
+        return row['Cell type']
+    else:
+        return 'Other'
+
 def scatter(path_to_data, cmd_args):
     model = cmd_args[1]
     if len(cmd_args)>2:
@@ -83,7 +89,8 @@ def scatter(path_to_data, cmd_args):
             exit(0)
             
     df = pd.read_csv(path_to_data).dropna() # remove N/As for scipy regression stats
-    cancer_only = df[df["Cancer?"]=="Not Cancer"]
+    # cancer_only = df[df["Cancer?"]=="Not Cancer"]
+    df["Interesting cell types"] = df.apply(lambda row:make_column(row), axis=1)
     if model == "linear":
         p = lmplot(data=df, x=independent_variable, y="Line1_Combined",
                     col="Cancer?",  scatter_kws={"s":2})
@@ -91,10 +98,14 @@ def scatter(path_to_data, cmd_args):
         p = lmplot(data=df, x=independent_variable, y="Line1_Combined",
                     col="Cancer?", order=3, scatter_kws={"s":2})
     # sns.lmplot(data=cancer_only, x="DAPI Intensity Mean", y="Line1_Combined")
+    elif model =='scatter':
+        p = sns.relplot(data=df, x=independent_variable, y="Line1_Combined",
+                    col="Cancer?", hue = 'Interesting cell types',alpha = 0.1,  size=1.2, edgecolor=None)
     else:
         print("Bad input")
         exit(0)
-    p.map_dataframe(annotate)
+    if model != 'scatter':
+        p.map_dataframe(annotate)
     plt.show()
 
 def plot_dapi_bins(pre_process_df, cmd_args):
@@ -132,18 +143,66 @@ def plot_dapi_bins(pre_process_df, cmd_args):
     # l1counts.bar_label(l1counts.containers[0])
     plt.show()
 
+def l1_vs_counts(datapath,cmd_args):
+
+    df = pd.read_csv(datapath).dropna()
+    df["Interesting cell types"] = df.apply(lambda row:make_column(row), axis=1)
+    p = sns.relplot(data=df, x='Total transcript counts', y="Line1_Combined",
+                     col="Interesting cell types",hue='DAPI Intensity over Area Decile',
+                       col_wrap=4, size=1.2, alpha=0.2,edgecolor=None)
+    plt.show()
+
+def l1_vs_texture(datapath,cmd_args):
+    if len(cmd_args) > 3:
+        texture_option = cmd_args[3]
+    else:
+        texture_option = 'correlation'
+    df = pd.read_csv(datapath).dropna()
+    df["Interesting cell types"] = df.apply(lambda row:make_column(row), axis=1)
+    p = sns.relplot(data=df, x=f'Texture-{texture_option}', y="Line1_Combined",
+                     col="Interesting cell types",col_wrap=3, hue = "Interesting cell types",alpha=0.3, size=0.9,edgecolor=None)
+    plt.show()
+    
+def plot_texture_bars(datapath,cmd_args):
+    df = pd.read_csv(datapath).dropna()
+    df["Interesting cell types"] = df.apply(lambda row:make_column(row), axis=1)
+
+    if len(cmd_args) > 3:
+        texture_option = cmd_args[3]
+    else:
+        texture_option = 'correlation'
+
+    bar_type = 'mean'
+
+    l1bins = sns.barplot(data=df, x='Interesting cell types',y=f'Texture-{texture_option}', errorbar='se',
+                estimator = bar_type, hue="Cancer?").set(title= f'{bar_type.title()} {texture_option} by cell type')
+    plt.show()
+
 def main():
     if len(sys.argv) > 1:
-        if sys.argv[1] == 'linear' or sys.argv[1] == 'polynomial':
-            print("Preparing to plot a trendline...")
+        if sys.argv[1] == 'linear' or sys.argv[1] == 'polynomial'or sys.argv[1] == 'scatter':
+            if sys.argv[1] != 'scatter':
+                print("Preparing to plot a trendline...")
+            else: 
+                if sys.argv[2] == 'texture':
+                    l1_vs_texture(custom_data_path, sys.argv)
+                    exit(0)
+                print("Assembling scatterplots...")
+                if len(sys.argv) > 2 and sys.argv[2] == 'counts':
+                    l1_vs_counts(custom_data_path,sys.argv)
+                    exit(0)
+
             scatter(custom_data_path, sys.argv)
         elif sys.argv[1] == 'barplot':
-            print("Assembling a bar plot...")
-            plot_dapi_bins(pd.read_csv(custom_data_path).dropna(), sys.argv)
+            print("Assembling bar plots ...")
+            if sys.argv[2] == 'texture':
+                plot_texture_bars(custom_data_path,sys.argv)
+            else:
+                plot_dapi_bins(pd.read_csv(custom_data_path).dropna(), sys.argv)
         else:
             print("Check your input.")
     else:
-        print("\nCaclulating bins to append to input dataframe...   ",end='')
+        print("\nCalculating bins to append to input dataframe...   ",end='')
         bin_by_dapi(df = pd.read_csv(custom_data_path).dropna(), norm_by_area=True)
         print("Done.")
 
