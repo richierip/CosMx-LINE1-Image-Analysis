@@ -26,6 +26,11 @@ from skimage.transform import rotate
 from skimage.feature import graycomatrix,graycoprops # Creating texture metrics
 import pyfeats
 
+# Texture features take a long time, so these modules
+#   add concurrency
+from multiprocessing import Process, Lock, Pipe
+from multiprocessing.connection import wait
+
 
 # CELL_MASK_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\CellLabels\CellLabels_F004.tif"
 # COMPOSITE_IMAGE = r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\CellComposite\CellComposite_F004.jpg"
@@ -41,7 +46,7 @@ DOWNSAMPLE = int(math.pow(2,6)-1)
 REMOVE_GLCM_ZEROES = False
 # FOV_GLOBAL_X = int(-4972.22222222222)
 # FOV_GLOBAL_Y = int(144450)
-RESULTS_FILE = r"..\CosMx_C4_CellResults_GaborFeats.csv"
+RESULTS_FILE = r"..\CosMx_C4_CellResults_GaborFeats2.csv"
 
 ''' Get cell data as numpy array, convert to binary, and return. '''
 def read_mask(path_to_label_mask, path_to_compartment_mask):
@@ -107,13 +112,16 @@ def get_pixels_for_cell(nuclear_mask,dapi_only,cell_id,metadata,fov_x,fov_y, max
 
 ''' Return a dictionary of the mean DAPI value for all cells
     Key: a cell ID          value: Mean of DAPI counts per pixel for that cell'''
-def mean_for_all_cells(nuclear_dapi,cell_id, cell_lookup, other_params, fov):
+def mean_for_all_cells(nuclear_dapi,cell_id, cell_lookup, other_params, fov, lock):
     
     # dump zeroes, then check length( i.e. testing the number of pixels in the nuclear mask)
     current = np.ndarray.flatten(nuclear_dapi)
     current = current[current !=0]
     if len(current)<MIN_DAPI_AREA:
-        if len(current) >0: print(f'Nucleus of CID {cell_id} is only {len(current)} pixels, dropping this one.')
+        if len(current) >0: 
+            # lock.acquire()
+            print(f'FOV {fov} CID {cell_id} nucleus is only {len(current)} pixels, dropping this one.')
+            # lock.release()
         return cell_lookup, other_params
     
     ## Checking a specific case
@@ -206,29 +214,29 @@ def add_glcm_metrics(nuclear_dapi, cell_id,fov, other_params, distance_range,ang
     return other_params
 
 def add_gabor_metrics(nuclear_dapi, nuclear_mask, cell_id, fov, other_params):
-    features, labels = pyfeats.gt_features(nuclear_dapi,nuclear_mask, deg=4, freq=[0.05, 0.4])
+    features, labels = pyfeats.gt_features(nuclear_dapi,nuclear_mask, deg=4, freq=[0.1, 0.15])
 
     f1_means = []
     f1_std = []
     f2_means = []
     f2_std = []
     for pos, l in enumerate(labels):
-        if l.endswith('freq_0.05_mean'): 
+        if l.endswith('freq_0.1_mean'): 
             f1_means.append(features[pos])
-        elif l.endswith('freq_0.4_mean'):
+        elif l.endswith('freq_0.15_mean'):
             f2_means.append(features[pos])
-        elif l.endswith('freq_0.05_std'):
+        elif l.endswith('freq_0.1_std'):
             f1_std.append(features[pos])
         else:
             f2_std.append(features[pos])
-    other_params[f"{fov}_{cell_id}_gabor0.05_mean"] = np.mean(f1_means)
-    other_params[f"{fov}_{cell_id}_gabor0.05_std"] = np.mean(f1_std)
-    other_params[f"{fov}_{cell_id}_gabor0.4_mean"] = np.mean(f2_means)
-    other_params[f"{fov}_{cell_id}_gabor0.4_std"] = np.mean(f2_std)
+    other_params[f"{fov}_{cell_id}_gabor0.1_mean"] = np.mean(f1_means)
+    other_params[f"{fov}_{cell_id}_gabor0.1_std"] = np.mean(f1_std)
+    other_params[f"{fov}_{cell_id}_gabor0.15_mean"] = np.mean(f2_means)
+    other_params[f"{fov}_{cell_id}_gabor0.15_std"] = np.mean(f2_std)
     return other_params
 
 
-def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite_path):
+def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite_path, lock):
     cell_mask_path = mask_tuple[0]; compartment_mask_path = mask_tuple[1]
     global_nuclear_mask = read_mask(cell_mask_path, compartment_mask_path)
     # print(f"\ncell_mask shape is {global_nuclear_mask.shape}, max is {np.max(global_nuclear_mask)}, min is {np.min(global_nuclear_mask)}")
@@ -237,7 +245,9 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
 
     dapi_only = extract_dapi_signal_tif(composite_path)
     max_X = dapi_only.shape[0]; max_Y = dapi_only.shape[1]
+    # lock.acquire()
     print(f"\ndapi shape is {dapi_only.shape}, max is {np.max(dapi_only)}, min is {np.min(dapi_only)}")
+    # lock.release()
 
     # viewer.add_image(dapi_only,name='DAPI')
     
@@ -253,15 +263,20 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
     angle_step = np.pi/2
     angle_end = np.pi * 2
     angles_range = np.arange(0,angle_end,angle_step)
+    # angles_range = [0]
 
     for cell_id in metadata["cell_ID"]:
         if cell_id %100 ==0:
-            print(f'On cell {cell_id}')        
+            # lock.acquire()
+            print(f'On fov {fov}, cell {cell_id}')    
+            # lock.release    
         # print(f"My inputs are CID {cell_id} ,fov {fov}")
         nuclear_dapi, nuclear_mask, coords = get_pixels_for_cell(global_nuclear_mask,dapi_only,cell_id,metadata,fov_global_X,fov_global_Y,max_Y)
-        other_params[f"{fov}_{cell_id}_localX"] = coords[0]
+        other_params[f"{fov}_{cell_id}_localX"] = coords[0] # Add XY to make it easier to find cells of interest
         other_params[f"{fov}_{cell_id}_localY"] = coords[1]
         # compute_roundness(dapi_cells)
+        # other_params = add_gabor_metrics(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
+
         try:
             if np.any(nuclear_dapi):
                 # other_params = add_glcm_metrics(nuclear_dapi,cell_id, fov, other_params, distances_range,angles_range)
@@ -273,7 +288,7 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
             print(f'some other error occurred when trying to calculate texture for {cell_id} in {fov}')
             print(f'\n {e}')
             exit()
-        cell_dictionary,other_params = mean_for_all_cells(nuclear_dapi, cell_id, cell_dictionary,other_params,fov)
+        cell_dictionary,other_params = mean_for_all_cells(nuclear_dapi, cell_id, cell_dictionary,other_params,fov, lock)
     return cell_dictionary,other_params
     # return mean_for_all_cells(global_nuclear_mask,dapi_only,cell_dictionary,other_params, metadata,fov, fov_global_X, fov_global_Y, max_Y)
 
@@ -337,22 +352,22 @@ def add_columns(transcripts_path, meta_path, celltyping_path, cell_df):
     return cell_df
         
 def assemble_df(cell_dict,other_params):
-    # df = pd.DataFrame(columns=['global_cid', 'fov', 'local_cid','DAPI Intensity Mean','DAPI Area (px)',
+    # df = pd.DataFrame(columns=['global_cid', 'fov', 'local_cid','Local X','Local Y','DAPI Intensity Mean','DAPI Area (px)',
     #     'Texture-correlation','Texture-dissimilarity','Texture-homogeneity','Texture-ASM','Texture-energy','Texture-contrast'])
     df = pd.DataFrame(columns=['global_cid', 'fov', 'local_cid','Local X','Local Y','DAPI Intensity Mean','DAPI Area (px)',
-        'Gabor f0.05 mean','Gabor f0.05 std','Gabor f0.4 mean','Gabor f0.4 std'])
+        'Gabor f0.1 mean','Gabor f0.1 std','Gabor f0.15 mean','Gabor f0.15 std'])
     for cid in cell_dict.keys():
         cell_mean = cell_dict[cid]
         both = cid.split("_")
-        # d = {'global_cid': cid, "fov":both[0],"local_cid":both[1],
+        # d = {'global_cid': cid, "fov":both[0],"local_cid":both[1],'Local X':other_params[f'{cid}_localX'],'Local Y':other_params[f'{cid}_localY'],
         #     'DAPI Intensity Mean':cell_mean, "DAPI Area (px)": other_params[cid+"_area"],
         #     'Texture-correlation':other_params[cid+"_texture-correlation"],'Texture-dissimilarity':other_params[cid+"_texture-dissimilarity"],
         #     'Texture-homogeneity':other_params[cid+"_texture-homogeneity"],'Texture-ASM':other_params[cid+"_texture-ASM"],
         #     'Texture-energy':other_params[cid+"_texture-energy"],'Texture-contrast':other_params[cid+"_texture-contrast"]}
         d = {'global_cid': cid, "fov":both[0],"local_cid":both[1],'Local X':other_params[f'{cid}_localX'],'Local Y':other_params[f'{cid}_localY'],
             'DAPI Intensity Mean':cell_mean, "DAPI Area (px)": other_params[cid+"_area"],
-            'Gabor f0.05 mean':other_params[cid+"_gabor0.05_mean"],'Gabor f0.05 std':other_params[cid+"_gabor0.05_std"],
-            'Gabor f0.4 mean':other_params[cid+"_gabor0.4_mean"],'Gabor f0.4 std':other_params[cid+"_gabor0.4_std"]}
+            'Gabor f0.1 mean':other_params[cid+"_gabor0.1_mean"],'Gabor f0.1 std':other_params[cid+"_gabor0.1_std"],
+            'Gabor f0.15 mean':other_params[cid+"_gabor0.15_mean"],'Gabor f0.15 std':other_params[cid+"_gabor0.15_std"]}
         df = pd.concat([df,pd.DataFrame(data=d,index=[1])], ignore_index=True)
     return df
 
@@ -360,26 +375,55 @@ def dump_csv(df):
     df.to_csv(RESULTS_FILE, index=False)
     return None
 
+def process_fov(tif, root, pipe_out, lock):
+    lap_start = time.time()
+    fov = int(tif.split("_")[-2].lstrip("[F0]"))
+    cell_mask = os.path.normpath(os.path.join(root,"../CellLabels/CellLabels_" + tif.split("_")[-2] + ".tif"))
+    compartment_mask = os.path.normpath(os.path.join(root,"../CompartmentLabels/CompartmentLabels_" + tif.split("_")[-2] + ".tif"))
+    composite_path = os.path.normpath(os.path.join(root,tif))
+    # lock.acquire()
+    print(f"Compartment path is {compartment_mask} and mask is {cell_mask}")
+    print(f"\nWorking on FOV {fov}...",end="   ")
+    # lock.release()
+    dapi_means, other_params = add_counts_for_fov({},{}, fov, (cell_mask,compartment_mask), composite_path, lock)
+    lap_end = time.time() 
+    # lock.acquire()
+    print(f"Finished with FOV {fov} in {lap_end-lap_start} seconds. Have data for {len(dapi_means)} nuclei")
+    # lock.release()
+
+    pipe_out.send((dapi_means,other_params))
+    pipe_out.close()
+
 def main():
     # print(f"max value for dapi means is {max(dapi_means.values())}")
     dapi_means={}
     other_params={}
     start = time.time()
+    readers=[]
+    lock = Lock()
     "..\RawData\MultichannelImages\20220405_130717_S1_C902_P99_N99_F001_Z004.TIF"
     for root,dirs,files in os.walk("..\RawData\MultichannelImages"):
         # print(files)
-        for tif in files:
-            lap_start = time.time()
-            fov = int(tif.split("_")[-2].lstrip("[F0]"))
-            cell_mask = os.path.normpath(os.path.join(root,"../CellLabels/CellLabels_" + tif.split("_")[-2] + ".tif"))
-            compartment_mask = os.path.normpath(os.path.join(root,"../CompartmentLabels/CompartmentLabels_" + tif.split("_")[-2] + ".tif"))
-            composite_path = os.path.normpath(os.path.join(root,tif))
-            print(f"Compartment path is {compartment_mask} and mask is {cell_mask}")
-            print(f"\nWorking on FOV {fov}...",end="   ")
-            dapi_means, other_params = add_counts_for_fov(dapi_means,other_params, fov, (cell_mask,compartment_mask), composite_path)
-            lap_end = time.time() 
-            print(f"Completed in {lap_end-lap_start} seconds. Have data for {len(dapi_means)} nuclei in fov {fov}")
+        for tif in files[2:8]:
+            print(f'tif is {tif}')
+            r, w = Pipe(duplex=False)
+            readers.append(r)
+            p = Process(target = process_fov,args=(tif, root, w, lock))
+            p.start()
+            w.close()   
             # if fov ==1: break # for testing
+
+    # wait until everything is done.
+    # As data comes in, add it to the appropriate dictionary
+    while readers:
+        for r in wait(readers):
+            try:
+                fov_dict1,fov_dict2 = r.recv()
+                dapi_means.update(fov_dict1)
+                other_params.update(fov_dict2)
+            except EOFError:
+                readers.remove(r)
+
     end = time.time()
     print(f"\nAll FOVs runtime: {end-start} seconds.")
 

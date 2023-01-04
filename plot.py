@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import sys
 
-custom_data_path = r"..\CosMx_C4_CellResults_glcmFeats_d=5_directionallyInvariant_8bit.csv"
+custom_data_path = r"..\CosMx_C4_CellResults_GaborFeats2.csv"
 
 def bin_by_dapi(df, norm_by_area=False):
     def _calc_norm_area(row):
@@ -172,9 +172,16 @@ def plot_texture_bars(datapath,cmd_args):
     else:
         texture_option = 'correlation'
 
+    if texture_option in ['correlation','ASM','energy','dissimilarity','contrast','homogeneity']:
+        texture_option = f'Texture-{texture_option}'
+    else:
+        freq = cmd_args[3]
+        s = cmd_args[4]
+        texture_option = f'Gabor {freq} {s}'
+
     bar_type = 'mean'
 
-    l1bins = sns.barplot(data=df, x='Interesting cell types',y=f'Texture-{texture_option}', errorbar='se',
+    l1bins = sns.barplot(data=df, x='Interesting cell types',y=texture_option, errorbar='se',
                 estimator = bar_type, hue="Cancer?").set(title= f'{bar_type.title()} {texture_option} by cell type')
     plt.show()
 
