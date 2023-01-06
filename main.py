@@ -25,14 +25,17 @@ from skimage.measure import label, regionprops, regionprops_table
 from skimage.transform import rotate
 from skimage.feature import graycomatrix,graycoprops # Creating texture metrics
 import pyfeats
+import matplotlib.pyplot as plt # checking out fft
+import numpy
+import sys
 
 
 # CELL_MASK_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\CellLabels\CellLabels_F004.tif"
 # COMPOSITE_IMAGE = r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\CellComposite\CellComposite_F004.jpg"
-METADATA = r"..\RawData\C4_R5042_S1_metadata_file.csv"
-FOV_POSITIONS = r"..\RawData\C4_R5042_S1_fov_positions_file.csv"
-TRANSCRIPTS = r"..\RawData\C4_R5042_S1_exprMat_file.csv"
-CELLTYPING = r"..\C4_napari\C4_napari\slide_C4_R5042_S1_Napari_metadata.csv"
+METADATA = os.path.normpath(r"../RawData/C4_R5042_S1_metadata_file.csv")
+FOV_POSITIONS = os.path.normpath(r"../RawData/C4_R5042_S1_fov_positions_file.csv")
+TRANSCRIPTS = os.path.normpath(r"../RawData/C4_R5042_S1_exprMat_file.csv")
+CELLTYPING = os.path.normpath(r"../C4_napari/C4_napari/slide_C4_R5042_S1_Napari_metadata.csv")
 MIN_DAPI_INTENSITY_THRESHOLD = 15
 MIN_DAPI_AREA = 30 # In pixels
 MIN_PANCK_THRESHOLD = 900
@@ -41,7 +44,7 @@ DOWNSAMPLE = int(math.pow(2,6)-1)
 REMOVE_GLCM_ZEROES = False
 # FOV_GLOBAL_X = int(-4972.22222222222)
 # FOV_GLOBAL_Y = int(144450)
-RESULTS_FILE = r"..\CosMx_C4_CellResults_GaborFeats.csv"
+RESULTS_FILE = os.path.normpath(r"../CosMx_C4_CellResults_GaborFeats32413.csv")
 
 ''' Get cell data as numpy array, convert to binary, and return. '''
 def read_mask(path_to_label_mask, path_to_compartment_mask):
@@ -206,7 +209,7 @@ def add_glcm_metrics(nuclear_dapi, cell_id,fov, other_params, distance_range,ang
     return other_params
 
 def add_gabor_metrics(nuclear_dapi, nuclear_mask, cell_id, fov, other_params):
-    features, labels = pyfeats.gt_features(nuclear_dapi,nuclear_mask, deg=4, freq=[0.05, 0.4])
+    spectrograms, features, labels = pyfeats.gt_features(nuclear_dapi,nuclear_mask, deg=4, freq=[1,0.9,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1,0.08])
 
     f1_means = []
     f1_std = []
@@ -225,8 +228,58 @@ def add_gabor_metrics(nuclear_dapi, nuclear_mask, cell_id, fov, other_params):
     other_params[f"{fov}_{cell_id}_gabor0.05_std"] = np.mean(f1_std)
     other_params[f"{fov}_{cell_id}_gabor0.4_mean"] = np.mean(f2_means)
     other_params[f"{fov}_{cell_id}_gabor0.4_std"] = np.mean(f2_std)
-    return other_params
 
+    img = plot_spectrogram(spectrograms,nuclear_dapi)
+    return img
+    # return other_params
+
+def plot_spectrogram(f_series, t_series):
+    # f1,f2 = f_series.shape
+    f_combined = t_series
+    # f_combined = abs(f_series[0])
+    # f_combined *= np.max(t_series)/np.max(f_combined)
+    # print(f_series[1:])
+    for n in f_series[12:22]:
+        n = np.asarray(n)
+        n  = abs(n)
+
+        n *= np.max(t_series)/(np.max(n) + 0.00001)
+
+        f_combined = np.append(f_combined,n, axis=1)
+
+    both = np.append(t_series,f_combined, axis=1)
+    
+    # f_series = abs(f_series)
+    # f_series *= np.max(t_series)/np.max(f_series)
+    # both = np.append(t_series,f_series, axis=1)
+    # plt.imshow(t_series)
+    # plt.show()
+    # plt.imshow(abs(f_series))
+    # plt.show()
+
+    return both
+    # plt.imshow(both)
+    # plt.title('[0.5 , 0.4 , 0.3 , 0.2 , 0.1 , 0.08 , 0.05]')
+    # plt.show()
+    # exit()
+
+def plot_frequency_domain(f_series, t_series):
+    f1,f2 = f_series.shape
+    plt.imshow(t_series)
+    plt.show()
+    plt.imshow(abs(f_series))
+    plt.show()
+    # exit()
+
+def fourier_stats(nuclear_dapi, nuclear_mask, cell_id, fov, other_params):
+    F,features,labels = pyfeats.fps(nuclear_dapi,nuclear_mask)
+
+    print(f"My features are {features}")
+    print(f"My labels are {labels}")
+    print(f"F is {F}")
+    print(f"Dapi spatial domain shape: {nuclear_dapi.shape}")
+    print(f"Frequency domain shape: {F.shape}")
+    plot_frequency_domain(F, nuclear_dapi)
 
 def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite_path):
     cell_mask_path = mask_tuple[0]; compartment_mask_path = mask_tuple[1]
@@ -254,7 +307,13 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
     angle_end = np.pi * 2
     angles_range = np.arange(0,angle_end,angle_step)
 
+    images = []
+    count = 0
     for cell_id in metadata["cell_ID"]:
+        if cell_id not in [653,675,806,782]:
+            continue
+        else:
+            print(f"\n LOOKING AT CELL {cell_id}")
         if cell_id %100 ==0:
             print(f'On cell {cell_id}')        
         # print(f"My inputs are CID {cell_id} ,fov {fov}")
@@ -265,7 +324,11 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
         try:
             if np.any(nuclear_dapi):
                 # other_params = add_glcm_metrics(nuclear_dapi,cell_id, fov, other_params, distances_range,angles_range)
-                other_params = add_gabor_metrics(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
+
+                # other_params = add_gabor_metrics(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
+                img = add_gabor_metrics(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
+                images.append(img)
+                # fourier_stats(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
             else:
                 # print(f'Empty list passed to texture creation code for cell {cell_id} in {fov}')
                 pass
@@ -274,6 +337,29 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
             print(f'\n {e}')
             exit()
         cell_dictionary,other_params = mean_for_all_cells(nuclear_dapi, cell_id, cell_dictionary,other_params,fov)
+
+        count +=1
+        if count % 4 ==0:
+            first = images[0] 
+            first = [np.asarray(first)]
+            for i in range(len(images)-1):
+                next = np.asarray(images[i+1])
+                first .append(next)
+            print(f"\n\nalength {len(first)}")    
+
+            fig = plt.figure()
+            fig.suptitle('[Spatial, 1 , 0.9 , 0.8 , 0.7 , 0.6 , 0.5 , 0.4 , 0.3 , 0.2 , 0.1 , 0.08]')
+
+            #subplot(r,c) provide the no. of rows and columns
+            f, axarr = plt.subplots(4,1) 
+
+            # use the created array to output your multiple images. In this case I have stacked 4 images vertically
+            for i in range(1,len(axarr)+1):
+                ax = fig.add_subplot(4,1,i)
+                ax.imshow(first[i-1])
+            plt.show()
+            images = []
+
     return cell_dictionary,other_params
     # return mean_for_all_cells(global_nuclear_mask,dapi_only,cell_dictionary,other_params, metadata,fov, fov_global_X, fov_global_Y, max_Y)
 
@@ -366,11 +452,14 @@ def main():
     other_params={}
     start = time.time()
     "..\RawData\MultichannelImages\20220405_130717_S1_C902_P99_N99_F001_Z004.TIF"
-    for root,dirs,files in os.walk("..\RawData\MultichannelImages"):
+    for root,dirs,files in os.walk(os.path.normpath("../RawData/MultichannelImages")):
         # print(files)
         for tif in files:
             lap_start = time.time()
             fov = int(tif.split("_")[-2].lstrip("[F0]"))
+            if fov !=19:
+                continue
+            else: print(f"\n FOV is 19")
             cell_mask = os.path.normpath(os.path.join(root,"../CellLabels/CellLabels_" + tif.split("_")[-2] + ".tif"))
             compartment_mask = os.path.normpath(os.path.join(root,"../CompartmentLabels/CompartmentLabels_" + tif.split("_")[-2] + ".tif"))
             composite_path = os.path.normpath(os.path.join(root,tif))
