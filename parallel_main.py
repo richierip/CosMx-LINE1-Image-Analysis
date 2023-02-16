@@ -27,6 +27,9 @@ from skimage.feature import graycomatrix,graycoprops # Creating texture metrics
 import pyfeats
 import matplotlib.pyplot as plt # checking out fft
 import numpy
+import cv2
+NUM_IMAGES_TO_SHOW = 10
+import scipy.fft as fft
 import sys
 numpy.set_printoptions(threshold=sys.maxsize)
 
@@ -34,7 +37,7 @@ numpy.set_printoptions(threshold=sys.maxsize)
 #   add concurrency
 from multiprocessing import Process, Lock, Pipe
 from multiprocessing.connection import wait
-DO_PARALLEL = True
+DO_PARALLEL = False
 ASSEMBLE = False
 WRITE = False
 SAVE_IMAGES = False
@@ -251,6 +254,32 @@ def plot_frequency_domain(f_series):
     plt.show()
     exit()
 
+def show_fourier(nuc,mask,cid,fov):
+    if f"{fov}_{cid}" not in ['7_3978', '7_732','7_734','7_675','7_684','19_653','19_675','19_782','19_806']:
+        return None
+    print(f"\nCurrently showing{fov}_{cid}\n")
+    img_f = fft.fft2(nuc)
+    display_img = 20*np.log(np.abs(fft.fftshift(img_f)))
+    display_img = display_img * (255/np.max(display_img))
+
+
+    # cv2.imshow(f"FOURIER FOV={fov}, CID={cid}",display_img.astype(np.uint8))
+    # cv2.moveWindow(f"FOURIER FOV={fov}, CID={cid}", 300,450)
+    # cv2.imshow(f"SPATIAL FOV={fov}, CID={cid}",nuc.astype(np.uint8))
+    # cv2.waitKey()
+    # cv2.destroyAllWindows()
+    nuc8 = (nuc/256).astype(np.uint8)
+    print(f"datatype is {nuc8.dtype}, max is {np.max(nuc8)}")
+    plt.imshow(nuc8,vmin=0,vmax=50)
+    plt.title(f"\nSpatial {fov}_{cid}\n")
+    plt.show()
+    plt.imshow(display_img)
+    plt.title(f"\nFourier{fov}_{cid}\n")
+    plt.show()
+    global NUM_IMAGES_TO_SHOW
+    NUM_IMAGES_TO_SHOW -=1
+    if NUM_IMAGES_TO_SHOW ==0:
+        exit()
 
 def fourier_stats(nuclear_dapi, nuclear_mask, cell_id, fov, other_params):
     F,features,labels = pyfeats.fps(nuclear_dapi,nuclear_mask)
@@ -312,7 +341,8 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
         try:
             if np.any(nuclear_dapi):
                 # other_params = add_glcm_metrics(nuclear_dapi,cell_id, fov, other_params, distances_range,angles_range)
-                other_params = add_gabor_metrics(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
+                # other_params = add_gabor_metrics(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
+                show_fourier(nuclear_dapi, nuclear_mask, cell_id, fov)
                 # fourier_stats(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
             else:
                 # print(f'Empty list passed to texture creation code for cell {cell_id} in {fov}')
@@ -408,9 +438,12 @@ def dump_csv(df):
     df.to_csv(RESULTS_FILE, index=False)
     return None
 
-def process_fov(tif, root, pipe_out = None, lock = None):
+def process_fov(tif, root, pipe_out = None, lock = None, fov_selection = None):
     lap_start = time.time()
     fov = int(tif.split("_")[-2].lstrip("[F0]"))
+    if fov_selection is not None:
+        if fov not in fov_selection:
+            return {},{}
     cell_mask = os.path.normpath(os.path.join(root,"../CellLabels/CellLabels_" + tif.split("_")[-2] + ".tif"))
     compartment_mask = os.path.normpath(os.path.join(root,"../CompartmentLabels/CompartmentLabels_" + tif.split("_")[-2] + ".tif"))
     composite_path = os.path.normpath(os.path.join(root,tif))
@@ -449,7 +482,7 @@ def main():
                 w.close()   
                 # if fov ==1: break # for testing
             else:
-                fov_dict1,fov_dict2 = process_fov(tif,root)
+                fov_dict1,fov_dict2 = process_fov(tif,root, fov_selection=[7,19])
                 dapi_means.update(fov_dict1)
                 other_params.update(fov_dict2)
 
