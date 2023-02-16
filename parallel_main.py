@@ -25,28 +25,38 @@ from skimage.measure import label, regionprops, regionprops_table
 from skimage.transform import rotate
 from skimage.feature import graycomatrix,graycoprops # Creating texture metrics
 import pyfeats
+import matplotlib.pyplot as plt # checking out fft
+import numpy
+import sys
+numpy.set_printoptions(threshold=sys.maxsize)
 
 # Texture features take a long time, so these modules
 #   add concurrency
 from multiprocessing import Process, Lock, Pipe
 from multiprocessing.connection import wait
-
-
+DO_PARALLEL = True
+ASSEMBLE = False
+WRITE = False
+SAVE_IMAGES = False
+from PIL import Image
 # CELL_MASK_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\CellLabels\CellLabels_F004.tif"
 # COMPOSITE_IMAGE = r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\CellComposite\CellComposite_F004.jpg"
-METADATA = r"..\RawData\C4_R5042_S1_metadata_file.csv"
-FOV_POSITIONS = r"..\RawData\C4_R5042_S1_fov_positions_file.csv"
-TRANSCRIPTS = r"..\RawData\C4_R5042_S1_exprMat_file.csv"
-CELLTYPING = r"..\C4_napari\C4_napari\slide_C4_R5042_S1_Napari_metadata.csv"
+
+METADATA = os.path.normpath (r"../RawData/C4_R5042_S1_metadata_file.csv")
+FOV_POSITIONS = os.path.normpath (r"../RawData/C4_R5042_S1_fov_positions_file.csv")
+TRANSCRIPTS = os.path.normpath (r"../RawData/C4_R5042_S1_exprMat_file.csv")
+CELLTYPING = os.path.normpath (r"../C4_napari/C4_napari/slide_C4_R5042_S1_Napari_metadata.csv")
 MIN_DAPI_INTENSITY_THRESHOLD = 15
 MIN_DAPI_AREA = 30 # In pixels
 MIN_PANCK_THRESHOLD = 900
 GLCM_DISTANCE = [1]
 DOWNSAMPLE = int(math.pow(2,6)-1)
 REMOVE_GLCM_ZEROES = False
+FREQ1 = .5
+FREQ2 = 1
 # FOV_GLOBAL_X = int(-4972.22222222222)
 # FOV_GLOBAL_Y = int(144450)
-RESULTS_FILE = r"..\CosMx_C4_CellResults_GaborFeats2.csv"
+RESULTS_FILE = os.path.normpath (f"../2.16.23_testing.csv")
 
 ''' Get cell data as numpy array, convert to binary, and return. '''
 def read_mask(path_to_label_mask, path_to_compartment_mask):
@@ -214,28 +224,44 @@ def add_glcm_metrics(nuclear_dapi, cell_id,fov, other_params, distance_range,ang
     return other_params
 
 def add_gabor_metrics(nuclear_dapi, nuclear_mask, cell_id, fov, other_params):
-    features, labels = pyfeats.gt_features(nuclear_dapi,nuclear_mask, deg=4, freq=[0.1, 0.15])
+    spectrograms, features, labels = pyfeats.gt_features(nuclear_dapi,nuclear_mask, deg=4, freq=[FREQ1, FREQ2])
 
     f1_means = []
     f1_std = []
     f2_means = []
     f2_std = []
     for pos, l in enumerate(labels):
-        if l.endswith('freq_0.1_mean'): 
+        if l.endswith(f'freq_{FREQ1}_mean'): 
             f1_means.append(features[pos])
-        elif l.endswith('freq_0.15_mean'):
+        elif l.endswith(f'freq_{FREQ2}_mean'):
             f2_means.append(features[pos])
-        elif l.endswith('freq_0.1_std'):
+        elif l.endswith(f'freq_{FREQ1}_std'):
             f1_std.append(features[pos])
         else:
             f2_std.append(features[pos])
-    other_params[f"{fov}_{cell_id}_gabor0.1_mean"] = np.mean(f1_means)
-    other_params[f"{fov}_{cell_id}_gabor0.1_std"] = np.mean(f1_std)
-    other_params[f"{fov}_{cell_id}_gabor0.15_mean"] = np.mean(f2_means)
-    other_params[f"{fov}_{cell_id}_gabor0.15_std"] = np.mean(f2_std)
+    other_params[f"{fov}_{cell_id}_gabor{FREQ1}_mean"] = np.mean(f1_means)
+    other_params[f"{fov}_{cell_id}_gabor{FREQ1}_std"] = np.mean(f1_std)
+    other_params[f"{fov}_{cell_id}_gabor{FREQ2}_mean"] = np.mean(f2_means)
+    other_params[f"{fov}_{cell_id}_gabor{FREQ2}_std"] = np.mean(f2_std)
     return other_params
 
+def plot_frequency_domain(f_series):
+    f1,f2 = f_series.shape
+    plt.imshow(abs(f_series))
+    plt.show()
+    exit()
 
+
+def fourier_stats(nuclear_dapi, nuclear_mask, cell_id, fov, other_params):
+    F,features,labels = pyfeats.fps(nuclear_dapi,nuclear_mask)
+
+    print(f"My features are {features}")
+    print(f"My labels are {labels}")
+    print(f"F is {F}")
+    print(f"Dapi spatial domain shape: {nuclear_dapi.shape}")
+    print(f"Frequency domain shape: {F.shape}")
+    plot_frequency_domain(F)
+    
 def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite_path, lock):
     cell_mask_path = mask_tuple[0]; compartment_mask_path = mask_tuple[1]
     global_nuclear_mask = read_mask(cell_mask_path, compartment_mask_path)
@@ -276,16 +302,23 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
         other_params[f"{fov}_{cell_id}_localY"] = coords[1]
         # compute_roundness(dapi_cells)
         # other_params = add_gabor_metrics(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
-
+        if SAVE_IMAGES:
+            try:
+                if np.any(nuclear_dapi):
+                    im = Image.fromarray(nuclear_dapi)
+                    im.save(r"/home/peter/data2/CosMx Texture Images/"+f"{fov}_{cell_id}_nuclearDapi_16bit.png")
+            except:
+                print(f"There was a problem saving fov {fov} CID {cell_id}")
         try:
             if np.any(nuclear_dapi):
                 # other_params = add_glcm_metrics(nuclear_dapi,cell_id, fov, other_params, distances_range,angles_range)
                 other_params = add_gabor_metrics(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
+                # fourier_stats(nuclear_dapi,nuclear_mask, cell_id, fov, other_params)
             else:
                 # print(f'Empty list passed to texture creation code for cell {cell_id} in {fov}')
                 pass
         except Exception as e:
-            print(f'some other error occurred when trying to calculate texture for {cell_id} in {fov}')
+            print(f'some other error occurred when trying to calculate texture for CID {cell_id} in fov {fov}')
             print(f'\n {e}')
             exit()
         cell_dictionary,other_params = mean_for_all_cells(nuclear_dapi, cell_id, cell_dictionary,other_params,fov, lock)
@@ -355,7 +388,7 @@ def assemble_df(cell_dict,other_params):
     # df = pd.DataFrame(columns=['global_cid', 'fov', 'local_cid','Local X','Local Y','DAPI Intensity Mean','DAPI Area (px)',
     #     'Texture-correlation','Texture-dissimilarity','Texture-homogeneity','Texture-ASM','Texture-energy','Texture-contrast'])
     df = pd.DataFrame(columns=['global_cid', 'fov', 'local_cid','Local X','Local Y','DAPI Intensity Mean','DAPI Area (px)',
-        'Gabor f0.1 mean','Gabor f0.1 std','Gabor f0.15 mean','Gabor f0.15 std'])
+        f'Gabor f{FREQ1} mean',f'Gabor f{FREQ1} std',f'Gabor f{FREQ2} mean',f'Gabor f{FREQ2} std'])
     for cid in cell_dict.keys():
         cell_mean = cell_dict[cid]
         both = cid.split("_")
@@ -366,8 +399,8 @@ def assemble_df(cell_dict,other_params):
         #     'Texture-energy':other_params[cid+"_texture-energy"],'Texture-contrast':other_params[cid+"_texture-contrast"]}
         d = {'global_cid': cid, "fov":both[0],"local_cid":both[1],'Local X':other_params[f'{cid}_localX'],'Local Y':other_params[f'{cid}_localY'],
             'DAPI Intensity Mean':cell_mean, "DAPI Area (px)": other_params[cid+"_area"],
-            'Gabor f0.1 mean':other_params[cid+"_gabor0.1_mean"],'Gabor f0.1 std':other_params[cid+"_gabor0.1_std"],
-            'Gabor f0.15 mean':other_params[cid+"_gabor0.15_mean"],'Gabor f0.15 std':other_params[cid+"_gabor0.15_std"]}
+            f'Gabor f{FREQ1} mean':other_params[cid+f"_gabor{FREQ1}_mean"],f'Gabor f{FREQ1} std':other_params[cid+f"_gabor{FREQ1}_std"],
+            f'Gabor f{FREQ2} mean':other_params[cid+f"_gabor{FREQ2}_mean"],f'Gabor f{FREQ2} std':other_params[cid+f"_gabor{FREQ2}_std"]}
         df = pd.concat([df,pd.DataFrame(data=d,index=[1])], ignore_index=True)
     return df
 
@@ -375,7 +408,7 @@ def dump_csv(df):
     df.to_csv(RESULTS_FILE, index=False)
     return None
 
-def process_fov(tif, root, pipe_out, lock):
+def process_fov(tif, root, pipe_out = None, lock = None):
     lap_start = time.time()
     fov = int(tif.split("_")[-2].lstrip("[F0]"))
     cell_mask = os.path.normpath(os.path.join(root,"../CellLabels/CellLabels_" + tif.split("_")[-2] + ".tif"))
@@ -390,9 +423,11 @@ def process_fov(tif, root, pipe_out, lock):
     # lock.acquire()
     print(f"Finished with FOV {fov} in {lap_end-lap_start} seconds. Have data for {len(dapi_means)} nuclei")
     # lock.release()
-
-    pipe_out.send((dapi_means,other_params))
-    pipe_out.close()
+    if DO_PARALLEL:
+        pipe_out.send((dapi_means,other_params))
+        pipe_out.close()
+    else:
+        return dapi_means, other_params
 
 def main():
     # print(f"max value for dapi means is {max(dapi_means.values())}")
@@ -401,40 +436,48 @@ def main():
     start = time.time()
     readers=[]
     lock = Lock()
-    "..\RawData\MultichannelImages\20220405_130717_S1_C902_P99_N99_F001_Z004.TIF"
-    for root,dirs,files in os.walk("..\RawData\MultichannelImages"):
+    "../RawData/MultichannelImages/20220405_130717_S1_C902_P99_N99_F001_Z004.TIF"
+    for root,dirs,files in os.walk(os.path.normpath("../RawData/MultichannelImages")):
         # print(files)
-        for tif in files[2:8]:
-            print(f'tif is {tif}')
-            r, w = Pipe(duplex=False)
-            readers.append(r)
-            p = Process(target = process_fov,args=(tif, root, w, lock))
-            p.start()
-            w.close()   
-            # if fov ==1: break # for testing
+        for tif in files:  #[2:8]:
+            if DO_PARALLEL is True:
+                print(f'tif is {tif}')
+                r, w = Pipe(duplex=False)
+                readers.append(r)
+                p = Process(target = process_fov,args=(tif, root, w, lock))
+                p.start()
+                w.close()   
+                # if fov ==1: break # for testing
+            else:
+                fov_dict1,fov_dict2 = process_fov(tif,root)
+                dapi_means.update(fov_dict1)
+                other_params.update(fov_dict2)
 
     # wait until everything is done.
     # As data comes in, add it to the appropriate dictionary
-    while readers:
-        for r in wait(readers):
-            try:
-                fov_dict1,fov_dict2 = r.recv()
-                dapi_means.update(fov_dict1)
-                other_params.update(fov_dict2)
-            except EOFError:
-                readers.remove(r)
+    if DO_PARALLEL:
+        while readers:
+            for r in wait(readers):
+                try:
+                    fov_dict1,fov_dict2 = r.recv()
+                    dapi_means.update(fov_dict1)
+                    other_params.update(fov_dict2)
+                except EOFError:
+                    readers.remove(r)
 
     end = time.time()
     print(f"\nAll FOVs runtime: {end-start} seconds.")
 
-    start = time.time()
-    print(f"\nAssembling data for {len(dapi_means.keys())} cells... ", end="   ")
-    output = add_columns(TRANSCRIPTS,METADATA,CELLTYPING, assemble_df(dapi_means, other_params))
-    end = time.time()
-    print(f"Completed in {end-start} seconds.")
-    print(f"\n Writing to {RESULTS_FILE} ... ", end='   ')
-    dump_csv(output)
-    print("Done.")
+    if ASSEMBLE:
+        start = time.time()
+        print(f"\nAssembling data for {len(dapi_means.keys())} cells... ", end="   ")
+        output = add_columns(TRANSCRIPTS,METADATA,CELLTYPING, assemble_df(dapi_means, other_params))
+        end = time.time()
+        print(f"Completed in {end-start} seconds.")
+    if WRITE:
+        print(f"\n Writing to {RESULTS_FILE} ... ", end='   ')
+        dump_csv(output)
+    print("Analysis completed.")
 
 if __name__ == "__main__":
     main()
