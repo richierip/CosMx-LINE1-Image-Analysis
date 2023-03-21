@@ -12,8 +12,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 import sys
+import os
 
-custom_data_path = r"..\CosMx_C4_CellResults_GaborFeats2.csv"
+custom_data_path = os.path.normpath(r"../2.17.23_synthetic_texture.csv")
 
 def bin_by_dapi(df, norm_by_area=False):
     def _calc_norm_area(row):
@@ -167,6 +168,7 @@ def plot_texture_bars(datapath,cmd_args):
     df = pd.read_csv(datapath).dropna()
     df["Interesting cell types"] = df.apply(lambda row:make_column(row), axis=1)
 
+    bar_type = 'mean'
     if len(cmd_args) > 3:
         texture_option = cmd_args[3]
     else:
@@ -174,15 +176,16 @@ def plot_texture_bars(datapath,cmd_args):
 
     if texture_option in ['correlation','ASM','energy','dissimilarity','contrast','homogeneity']:
         texture_option = f'Texture-{texture_option}'
+        f'{bar_type.title()} {texture_option} by cell type'
     else:
         freq = cmd_args[3]
         s = cmd_args[4]
         texture_option = f'Gabor {freq} {s}'
-
-    bar_type = 'mean'
+        bar_type = s
+        Title = f'{texture_option} by cell type'
 
     l1bins = sns.barplot(data=df, x='Interesting cell types',y=texture_option, errorbar='se',
-                estimator = bar_type, hue="Cancer?").set(title= f'{bar_type.title()} {texture_option} by cell type')
+                estimator = bar_type, hue="Cancer?").set(title= Title)
     plt.show()
 
 def main():
