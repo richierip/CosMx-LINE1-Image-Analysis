@@ -75,7 +75,7 @@ if __name__ == "__main__":
     print(f'Image type is {image.dtype}, shape is {image.shape} and maxint is {np.max(image)}')
 
     mask = copy.copy(image.astype(np.bool8))
-    mask[mask>1]=1
+    # mask[mask>1]=1
     rect = lir.lir(mask)
     ys = rect[0]
     ye = rect[0]+rect[2]

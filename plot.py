@@ -13,29 +13,34 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import sys
 
-custom_data_path = r"..\CosMx_C4_CellResults_GaborFeats2.csv"
+# custom_data_path = r"..\Tables\2.17.23_synthetic_texture.csv"
+custom_data_path = r"..\Tables\2.22.23_synthetic_b=8_o=3_t.3_NEWIMAGES.csv"
+# custom_data_path = r"..\Tables\CosMx_C4_CellResults_GaborFeats.csv"
 
 def bin_by_dapi(df, norm_by_area=False):
     def _calc_norm_area(row):
         return row["DAPI Intensity Mean"] / row["DAPI Area (px)"]
     # def _calc_percentile(row, colmax):
     #     return row["DAPI Intensity over Area"] *100 / colmax
-    def _label_decile(row):
-        rank = row["DAPI Intensity over Area Decile"]
+    def _label_decile(row,var):
+        rank = row[var]
         if rank == 0 or rank == '0':
             start = str(rank)
         else:
             start = str(rank) + '0'
         end = str(rank+1)+'0'
         return start + ' to '+ end
+
+    # Decile L1 counts 
+    df["Line1_Combined_Decile"] = pd.qcut(df["Line1_Combined"],10, labels=False)
+    df["Line1_Combined_Bin"] = df.apply(lambda row: _label_decile(row,"Line1_Combined_Decile"),axis=1)
     if norm_by_area:
         # independent_var = "DAPI Intensity over Area"
-        bin_name = "DAPI_Area_Norm_Bin"
         df["DAPI Intensity over Area"] = df.apply(lambda row:_calc_norm_area(row), axis=1)
         df["DAPI Intensity over Area Decile"] = pd.qcut(df["DAPI Intensity over Area"],10, labels=False)
         #df.apply(lambda row:_calc_percentile(row,df.loc[df['DAPI Intensity over Area'].idxmax()]['DAPI Intensity over Area']), axis=1)
         # independent_var = "DAPI Intensity over Area Percentile"
-        df["DAPI_Area_Norm_Bin"] = df.apply(lambda row: _label_decile(row),axis=1)
+        df["DAPI_Area_Norm_Bin"] = df.apply(lambda row: _label_decile(row,"DAPI Intensity over Area Decile"),axis=1)
 
     elif not norm_by_area:
         independent_var = "DAPI Intensity Mean"
@@ -72,6 +77,9 @@ def scatter(path_to_data, cmd_args):
             independent_variable = "DAPI Intensity Mean"
         elif iv == 'area':
             independent_variable = "DAPI Intensity over Area"
+        elif iv =='gabor':
+            #python plot.py scatter gabor
+            independent_variable = "Gabor f0.05 mean"
         else:
             print("\nNeed 'intensity' or 'area'")
             exit(0)
@@ -114,10 +122,18 @@ def plot_dapi_bins(pre_process_df, cmd_args):
     if len(cmd_args)>3:
         if cmd_args[3]== 'intensity':
             independent_var = "DAPI_Bin"
-            title_var = ' DAPI Intensity (binned)'
+            title_var = ' DAPI Intensity (binned) vs ORF1/2 Expression'
+            dependent_var = "Line1_Combined"
         elif cmd_args[3]=='area':
             independent_var = "DAPI_Area_Norm_Bin"
-            title_var = " DAPI Intensity over Area (percentile rank)"
+            title_var = " DAPI Intensity over Area (percentile rank) vs ORF1/2 Expression"
+            dependent_var = "Line1_Combined"
+        elif cmd_args[3]=='l1':
+            # python plot.py barplot mean l1
+            independent_var = "Line1_Combined_Bin"
+            title_var = " Combined Line1 (percentile rank) vs DAPI Intensity Mean (quilted images)"
+            dependent_var = "Gabor f0.05 mean"
+            # dependent_var = "DAPI Intensity Mean"
     else:
         bar_type = "mean"
         independent_var = "DAPI_Bin"
@@ -127,14 +143,17 @@ def plot_dapi_bins(pre_process_df, cmd_args):
     df = pre_process_df
     if independent_var == "DAPI_Bin":
         x_order = ["0 to 15","15 to 20","20 to 30","30 to 40","40 to 50","50 to 60","60 to 70","70 to 80","80 to 90","90 to 100",">100"]
-    elif independent_var == "DAPI_Area_Norm_Bin":
+    elif independent_var == "DAPI_Area_Norm_Bin" or independent_var =="Line1_Combined_Bin":
         x_order = ["0 to 10","10 to 20","20 to 30","30 to 40","40 to 50","50 to 60","60 to 70","70 to 80","80 to 90","90 to 100"]
         
     
-    l1bins = sns.barplot(data=df, x=independent_var,y="Line1_Combined", errorbar='sd',
-                estimator = bar_type,order = x_order, hue="Cancer?").set(title= bar_type.title()+title_var+' vs ORF1/2 Expression')
+    l1bins = sns.barplot(data=df, x=independent_var,y=dependent_var, errorbar="sd",
+                estimator = bar_type,order = x_order, hue="Cancer?").set(title= bar_type.title()+title_var)
     # axis_flip = sns.barplot(data=df, y=independent_var,x="Line1_Combined", errorbar='sd',
     #             estimator = bar_type,order = x_order, hue="Cancer?").set(title= 'L1 ORF1/2 Expression vs '+bar_type.title()+title_var)
+    plt.show()
+    l1bins = sns.barplot(data=df, x=independent_var,y=dependent_var,# errorbar="sd",
+                estimator = bar_type,order = x_order, hue="Cancer?").set(title= bar_type.title()+title_var)
     plt.show()
     l1counts = sns.countplot(data=df, x=independent_var,hue="Cancer?",order=x_order).set(title= 'Cell Counts by '+title_var)
     
@@ -159,7 +178,7 @@ def l1_vs_texture(datapath,cmd_args):
         texture_option = 'correlation'
     df = pd.read_csv(datapath).dropna()
     df["Interesting cell types"] = df.apply(lambda row:make_column(row), axis=1)
-    p = sns.relplot(data=df, x=f'Texture-{texture_option}', y="Line1_Combined",
+    p = sns.relplot(data=df, x=f'Gabor f0.05 mean', y="Line1_Combined",
                      col="Interesting cell types",col_wrap=3, hue = "Interesting cell types",alpha=0.3, size=0.9,edgecolor=None)
     plt.show()
     
@@ -175,13 +194,14 @@ def plot_texture_bars(datapath,cmd_args):
     if texture_option in ['correlation','ASM','energy','dissimilarity','contrast','homogeneity']:
         texture_option = f'Texture-{texture_option}'
     else:
+        # python plot.py barplot texture f0.4 mean
         freq = cmd_args[3]
         s = cmd_args[4]
         texture_option = f'Gabor {freq} {s}'
 
     bar_type = 'mean'
 
-    l1bins = sns.barplot(data=df, x='Interesting cell types',y=texture_option, errorbar='se',
+    l1bins = sns.violinplot(data=df, x='Interesting cell types',y=texture_option, errorbar='se',
                 estimator = bar_type, hue="Cancer?").set(title= f'{bar_type.title()} {texture_option} by cell type')
     plt.show()
 
