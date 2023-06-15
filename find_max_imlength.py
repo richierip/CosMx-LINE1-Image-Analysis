@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 
 
-path = r"/home/peter/data2/CosMx Texture Images (Padded)/"
+path = r"/home/peter/B10 CosMx Texture Images/"
 gmax = 0
 total_images = 0
 total_length = 0
