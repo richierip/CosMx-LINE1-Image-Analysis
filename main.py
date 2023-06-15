@@ -230,6 +230,7 @@ def add_gabor_metrics(nuclear_dapi, nuclear_mask, cell_id, fov, other_params):
     other_params[f"{fov}_{cell_id}_gabor0.4_std"] = np.mean(f2_std)
 
     img = plot_spectrogram(spectrograms,nuclear_dapi)
+    print(f"The max value for CID {cell_id} is {np.max(nuclear_dapi)}")
     return img
     # return other_params
 
@@ -309,8 +310,9 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
 
     images = []
     count = 0
+    CELLS_TO_PLOT = [684,732]# [3978,732,734,675,684]:
     for cell_id in metadata["cell_ID"]:
-        if cell_id not in [653,675,806,782]:
+        if cell_id not in CELLS_TO_PLOT:
             continue
         else:
             print(f"\n LOOKING AT CELL {cell_id}")
@@ -339,7 +341,7 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
         cell_dictionary,other_params = mean_for_all_cells(nuclear_dapi, cell_id, cell_dictionary,other_params,fov)
 
         count +=1
-        if count % 4 ==0:
+        if count % len(CELLS_TO_PLOT) ==0:
             first = images[0] 
             first = [np.asarray(first)]
             for i in range(len(images)-1):
@@ -351,11 +353,11 @@ def add_counts_for_fov(cell_dictionary, other_params, fov, mask_tuple, composite
             fig.suptitle('[Spatial, 1 , 0.9 , 0.8 , 0.7 , 0.6 , 0.5 , 0.4 , 0.3 , 0.2 , 0.1 , 0.08]')
 
             #subplot(r,c) provide the no. of rows and columns
-            f, axarr = plt.subplots(4,1) 
+            f, axarr = plt.subplots(len(CELLS_TO_PLOT),1) 
 
             # use the created array to output your multiple images. In this case I have stacked 4 images vertically
             for i in range(1,len(axarr)+1):
-                ax = fig.add_subplot(4,1,i)
+                ax = fig.add_subplot(len(CELLS_TO_PLOT),1,i)
                 ax.imshow(first[i-1])
             plt.show()
             images = []
@@ -457,7 +459,7 @@ def main():
         for tif in files:
             lap_start = time.time()
             fov = int(tif.split("_")[-2].lstrip("[F0]"))
-            if fov !=19:
+            if fov !=7:
                 continue
             else: print(f"\n FOV is 19")
             cell_mask = os.path.normpath(os.path.join(root,"../CellLabels/CellLabels_" + tif.split("_")[-2] + ".tif"))

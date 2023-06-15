@@ -10,50 +10,73 @@ import largestinteriorrectangle as lir
 import copy
 import scipy.fft as fft
 
+# def show_fourier(nuc,mask,cid,fov):
+#     if f"{fov}_{cid}" not in ['7_3978', '7_732','7_734','7_675','7_684','19_653','19_675','19_782','19_806']:
+#         return None
+#     print(f"\nCurrently showing{fov}_{cid}\n")
+#     img_f = fft.fft2(nuc)
+#     display_img = 20*np.log(np.abs(fft.fftshift(img_f)))
+#     display_img = display_img * (255/np.max(display_img))
 
-## Get parser arguments
-# parser = argparse.ArgumentParser()
-# parser.add_argument("-i", "--image_path", required=True, type=str, help="path of image you want to quilt")
-# parser.add_argument("-b", "--block_size", type=int, default=20, help="block size in pixels")
-# parser.add_argument("-o", "--overlap", type=int, default=1.0/6, help="overlap size in pixels (defaults to 1/6th of block size)")
-# parser.add_argument("-s", "--scale", type=float, default=4, help="Scaling w.r.t. to image size")
-# parser.add_argument("-n", "--num_outputs", type=int, default=1, help="number of output textures required")
-# parser.add_argument("-f", "--output_file", type=str, default="output.png", help="output file name")
-# parser.add_argument("-p", "--plot", type=int, default=1, help="Show plots")
-# parser.add_argument("-t", "--tolerance", type=float, default=0.1, help="Tolerance fraction")
 
-# args = parser.parse_args()
+#     # cv2.imshow(f"FOURIER FOV={fov}, CID={cid}",display_img.astype(np.uint8))
+#     # cv2.moveWindow(f"FOURIER FOV={fov}, CID={cid}", 300,450)
+#     # cv2.imshow(f"SPATIAL FOV={fov}, CID={cid}",nuc.astype(np.uint8))
+#     # cv2.waitKey()
+#     # cv2.destroyAllWindows()
+#     nuc8 = (nuc/256).astype(np.uint8)
+#     print(f"datatype is {nuc8.dtype}, max is {np.max(nuc8)}")
+#     plt.imshow(nuc8,vmin=0,vmax=50)
+#     plt.title(f"\nSpatial {fov}_{cid}\n")
+#     plt.show()
+#     plt.imshow(display_img)
+#     plt.title(f"\nFourier{fov}_{cid}\n")
+#     plt.show()
 
-def show_fourier(nuc,mask,cid,fov):
-    if f"{fov}_{cid}" not in ['7_3978', '7_732','7_734','7_675','7_684','19_653','19_675','19_782','19_806']:
+def synthesize_texture(cell_data, fov, cell_id,save_to_file, block_size = 10, output_side_length = 170):
+    cell_data = np.ascontiguousarray(cell_data)
+    create_plot = False
+    tolerance = 0.3
+    overlap = 5
+    mask =cell_data.astype(np.bool8)
+    rect = lir.lir(mask)
+    ys = rect[0]
+    ye = rect[0]+rect[2]
+    xs = rect[1]
+    xe = rect[1] +rect[3]
+    interior_rect_image = cell_data[xs:xe,ys:ye]
+    H, W = interior_rect_image.shape[:2]
+    if min(H,W) <1.5*block_size:
         return None
-    print(f"\nCurrently showing{fov}_{cid}\n")
-    img_f = fft.fft2(nuc)
-    display_img = 20*np.log(np.abs(fft.fftshift(img_f)))
-    display_img = display_img * (255/np.max(display_img))
+    # outH, outW = int(scale*H), int(scale*W)
+    outH, outW = int(output_side_length), int(output_side_length)
+    try:
+        textureMap = generateTextureMap(interior_rect_image, block_size, overlap, outH, outW, tolerance)
+    except:
+        return None
+    if create_plot:
+        nuc8 = (textureMap/256).astype(np.uint8)
+        plt.imshow(nuc8, vmin=0,vmax=50)
+        plt.show()
+        plt.imshow((cell_data/256).astype(np.uint8), vmin=0,vmax=50)
+        plt.show()
+    if save_to_file:
+        path = save_to_file+ f'{fov}_{cell_id}_syntheticDapi_16bit.png'
+        nuc16 = textureMap.astype(np.uint16)
+        # import IPython
+        # IPython.embed()
+        im = Image.fromarray(nuc16)
+        im.save(path)
+    return textureMap
 
-
-    # cv2.imshow(f"FOURIER FOV={fov}, CID={cid}",display_img.astype(np.uint8))
-    # cv2.moveWindow(f"FOURIER FOV={fov}, CID={cid}", 300,450)
-    # cv2.imshow(f"SPATIAL FOV={fov}, CID={cid}",nuc.astype(np.uint8))
-    # cv2.waitKey()
-    # cv2.destroyAllWindows()
-    nuc8 = (nuc/256).astype(np.uint8)
-    print(f"datatype is {nuc8.dtype}, max is {np.max(nuc8)}")
-    plt.imshow(nuc8,vmin=0,vmax=50)
-    plt.title(f"\nSpatial {fov}_{cid}\n")
-    plt.show()
-    plt.imshow(display_img)
-    plt.title(f"\nFourier{fov}_{cid}\n")
-    plt.show()
 
 if __name__ == "__main__":
     # Start the main loop here
     # path = r"C:\Users\prich\Downloads\clipped_nuc.png"
-    CID=675
-    FOV=7
-    path = r"C:\Users\prich\Downloads\\" + f"{FOV}_{CID}" + "_nuclearDapi_16bit.png"
-    block_size = 6
+    CID=196
+    FOV=9
+    path = r"/home/peter/data2/CosMx Texture Images/" + f"{FOV}_{CID}" + "_nuclearDapi_16bit.png"
+    block_size = 8
     scale = 3
     num_outputs = 1
     create_plot = True
@@ -66,16 +89,16 @@ if __name__ == "__main__":
     # if overlap > 0:
     # 	overlap = int(block_size*args.overlap)
     # else:
-    overlap = int(2)
+    overlap = int(3)
 
     # Get all blocks
     # image = cv2.imread(path) /256
     image = Image.open(path)
     image = np.asarray(image)
     print(f'Image type is {image.dtype}, shape is {image.shape} and maxint is {np.max(image)}')
-
+    plt.imshow(image,vmin=0,vmax=50)
+    plt.show()
     mask = copy.copy(image.astype(np.bool8))
-    # mask[mask>1]=1
     rect = lir.lir(mask)
     ys = rect[0]
     ye = rect[0]+rect[2]
@@ -104,7 +127,11 @@ if __name__ == "__main__":
     outH, outW = int(120), int(120)
 
     for i in range(num_outputs):
-        textureMap = generateTextureMap(image, block_size, overlap, outH, outW, tolerance)
+        try:
+            textureMap = generateTextureMap(image, block_size, overlap, outH, outW, tolerance)
+        except:
+            print(f"\nImage of shape {image.shape} is smaller than the required {block_size}x{block_size} square.  ")
+            exit()
         if create_plot:
             nuc8 = (textureMap/256).astype(np.uint8)
             plt.imshow(nuc8, vmin=0,vmax=50)
@@ -112,7 +139,7 @@ if __name__ == "__main__":
             plt.imshow((image/256).astype(np.uint8), vmin=0,vmax=50)
             plt.show()
 
-    show_fourier(textureMap,None,CID,FOV)
+    # show_fourier(textureMap,None,CID,FOV)
     # Save
     textureMap = (255*textureMap).astype(np.uint8)
     textureMap = cv2.cvtColor(textureMap, cv2.COLOR_RGB2BGR)

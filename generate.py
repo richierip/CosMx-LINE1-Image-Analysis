@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from math import ceil
 from itertools import product
 
-inf = np.float('inf')
+inf = float('inf')
 ErrorCombinationFunc = np.add
 
 def findPatchHorizontal(refBlock, texture, blocksize, overlap, tolerance):
@@ -219,7 +219,7 @@ def generateTextureMap(image, blocksize, overlap, outH, outW, tolerance):
 		patchBlock = findPatchHorizontal(refBlock, image, blocksize, overlap, tolerance)
 		minCutPatch = getMinCutPatchHorizontal(refBlock, patchBlock, blocksize, overlap)
 		textureMap[:blocksize, (blkIdx):(blkIdx+blocksize)] = minCutPatch
-	print("{} out of {} rows complete...".format(1, nH+1))
+	# print("{} out of {} rows complete...".format(1, nH+1))
 
 
 	### Fill the first column
@@ -253,7 +253,7 @@ def generateTextureMap(image, blocksize, overlap, outH, outW, tolerance):
 			# textureMap[(blkIndexI):(blkIndexI+blocksize), (blkIndexJ-blocksize+overlap):(blkIndexJ+overlap)] = refBlockLeft
 			# textureMap[(blkIndexI-blocksize+overlap):(blkIndexI+overlap), (blkIndexJ):(blkIndexJ+blocksize)] = [0.5, 0.6, 0.7]
 			# break
-		print("{} out of {} rows complete...".format(i+1, nH+1))
+		# print("{} out of {} rows complete...".format(i+1, nH+1))
 		# break
 
 	return textureMap
