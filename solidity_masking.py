@@ -149,7 +149,7 @@ old_labels_layer = viewer.add_labels(labels.astype(np.uint8),name='ID overlay',b
 
 
 #Get points
-tx = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\C4_R5042_S1_tx_file.csv")
+tx = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CosMx\RawData\C4_R5042_S1_tx_file.csv")
 l1_fov = tx.loc[(tx["fov"] == int(FOV)) & (tx["target"].isin(["LINE1_ORF1","LINE1_ORF2"]))].copy()
 ymax = l1_fov['y_local_px'].max()
 # IPython.embed()

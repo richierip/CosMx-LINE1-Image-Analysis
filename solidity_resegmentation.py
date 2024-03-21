@@ -15,11 +15,14 @@ from skimage.segmentation import expand_labels, watershed
 from skimage.morphology import binary_erosion
 import copy
 from math import pow
+import os
+import pathlib
 
 MIN_PANCK_THRESHOLD = 900
 CYTOPLASM_DILATION = 10 # pixels
-tx = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\C4_R5042_S1_tx_file.csv")
-
+# tx = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\C4_R5042_S1_tx_file.csv")
+image_masks_path = os.path.normpath(r"N:\Imagers\ImageProcessing\Peter\CosMx Resegmentation\Resegmented_Masks_allRuns")
+labels_path = os.path.normpath(r"N:\Imagers\ImageProcessing\Peter\CosMx Resegmentation\Resegmented_Labels_allRuns")
 
 
 def convert(img, original_bit_depth, target_bit_depth, target_type):
@@ -69,88 +72,115 @@ def shrink_cells_by_nuclear_size(cell_labels, nuc_labels, initial_expansion_dist
 
 
 
-
+run_dictionary = {} # "C4":[image1, image2 ... imageN], "D10": [image1, image2...]
+for fileN in os.listdir(image_masks_path):
+    run_name = fileN.split("_")[0]
+    try:
+        run_dictionary[run_name]
+    except KeyError:
+        run_dictionary[run_name] = [fileN]
+        continue
+    run_dictionary[run_name].append(fileN)
 
 global_metadata = pd.DataFrame()
 global_counts_table = pd.DataFrame()
-for FOV in range(1,25):
-    FOV = f'0{FOV}' if FOV<10 else FOV
-    print(f"\nProcessing C4 FOV {FOV}")
-# FOV = "16" # 18 has highest split for .89
+fov_count = 0
+for run in run_dictionary.keys():
 
-    # im = tifffile.imread(f"../RawData/full_size_mask_resegmented/20220405_130717_S1_C902_P99_N99_F0{FOV}_Z004_job18071_analysis.tif")
-    nuclear = tifffile.imread(f"N:/Imagers/ImageProcessing/Peter/CosMx Resegmentation/Resegmented_Masks/20220405_130717_S1_C902_P99_N99_F0{FOV}_Z004.tif")
-    tif = tifffile.imread(f"../RawData/MultichannelImages/20220405_130717_S1_C902_P99_N99_F0{FOV}_Z004.TIF")
-    tif = np.transpose(tif, (1,2,0)) # put channels at the end
+    # Get transcript file
+    tx_path = os.path.normpath(image_masks_path+f"/../C4/")
+    for f in os.listdir(tx_path):
+        if f.endswith("_tx_file.csv"): break
+    print(f"Reading {run} transcript file ...")
+    tx = pd.read_csv(os.path.normpath(tx_path +"/"+f))
 
-    # old_labels_path = f"../RawData/CellLabels/CellLabels_F0{FOV}.tif"
-    # old_labels = tifffile.imread(old_labels_path)
-    # # Binarize halo mask - pixels over a detected nucleus will have a 1, and background will have a 0
-    # im = im[:,:,2]
-    # im[im<100] = 0
-    # im[im>=100] = 1
 
-    # nuclear = resize(im, old_labels.shape, anti_aliasing=True)
-    # nuclear[nuclear !=0] = 1 # binarize again for some reason?? Pixels are float values before this.
+    for FOV in range(1,len(run_dictionary[run])):
+        FOV = f'0{FOV}' if FOV<10 else FOV
+        print(f"\nProcessing {run} FOV {FOV}. Have done {fov_count}")
+        fov_count+=1
+    # FOV = "16" # 18 has highest split for .89
+        
 
-    # label with cell
-    nuc_labels = label(nuclear.astype(np.uint), connectivity=1) # diagonal touching doesn't count
-    dilation_for_cytoplasm = expand_labels(nuc_labels, distance=CYTOPLASM_DILATION)
-
-    tifffile.imwrite(f'../Resegmentation/Labels/C4_{FOV}_nuclearLabels.tif', nuc_labels)
-    tifffile.imwrite(f'../Resegmentation/Labels/C4_{FOV}_{CYTOPLASM_DILATION}_cellLabels.tif', dilation_for_cytoplasm)
-    # continue
     
-    # Correct y coord issue
-    ymax = tif.shape[0] # this is the y axis channel  #tx.loc[tx['fov'] == int(FOV), 'y_local_px'].max()
-    # print(ymax)
-    tx.loc[tx['fov']==int(FOV),['y_local_px']] = ymax - tx['y_local_px']
-    # assign transcripts to cell ID
-    new_tx = tx.copy()
-    new_tx['cell_ID'] = dilation_for_cytoplasm[new_tx['y_local_px'].astype(int),new_tx['x_local_px'].astype(int)]
+        nuclear = tifffile.imread(os.path.normpath(image_masks_path + f"/{run}_F0{FOV}_CosMxResegmentationMask.tif"))
 
-    # collapse and pivot into the counts matrix
-    t = new_tx.loc[new_tx["fov"]==int(FOV)].groupby(by='cell_ID')['target'].value_counts().to_frame().rename(columns = 
-                        {"target":"target_count"}).reset_index().pivot(index="cell_ID",
-                            columns="target", values="target_count").fillna(0)
-    # Locate and add rows for missing cells
-    missingnos = list(set(np.unique(dilation_for_cytoplasm)).difference(set(t.index))) # find cids missing
-    line = pd.DataFrame(0, index = missingnos, columns = t.columns) # create a frame for the missing cids
-    t = pd.concat([t,line])
-    t = t.sort_index().reset_index().rename(columns={"index":"cell_ID"}) # create a column from the index
-    t["fov"] = f"{FOV}" # Multiple FOVs in an image with duplicate cell_IDs, so must label FOV
-    
-    t.to_csv(f"../Resegmentation/FOV Counts Tables/C4_{FOV}_Cyto{CYTOPLASM_DILATION}_resegmentation_countsTable.csv", index=False)
-    global_counts_table = pd.concat([global_counts_table, t])
+        for fl in os.listdir(os.path.normpath(image_masks_path + f"/../{run}/MultichannelImages/")):
+            if f"F0{FOV}" in fl: break
 
-    props = ["label", "area", "eccentricity","feret_diameter_max","intensity_mean", "intensity_max", "perimeter","solidity"]
-    nuc_metadata = regionprops_table(nuc_labels,tif[:,:,4], properties = props)
-    nuc_metadata = pd.DataFrame(nuc_metadata).rename(columns={"label":"cell_ID","area":"Nuclear area", "perimeter":"Nuclear perimeter",
-                                                            "intensity_mean":"Mean DAPI","intensity_max":"Max DAPI"}) # only want DAPI intensity in the nucleus
+        tif = tifffile.imread(os.path.normpath(image_masks_path + f"/../{run}/MultichannelImages/{fl}"))
+        tif = np.transpose(tif, (1,2,0)) # put channels at the end
 
-    props = ["label", "area","centroid", "bbox", "intensity_mean", "intensity_max","perimeter"]
-    metadata = regionprops_table(dilation_for_cytoplasm, tif, properties = props)
+        # old_labels_path = f"../RawData/CellLabels/CellLabels_F0{FOV}.tif"
+        # old_labels = tifffile.imread(old_labels_path)
+        # # Binarize halo mask - pixels over a detected nucleus will have a 1, and background will have a 0
+        # im = im[:,:,2]
+        # im[im<100] = 0
+        # im[im>=100] = 1
 
-    cell_metadata = pd.DataFrame(metadata).rename(columns={"label":"cell_ID","centroid-0":"fovX","centroid-1":"fovY",
-                                        "bbox-0":"XMin", "bbox-1":"YMin","bbox-2":"XMax","bbox-3":"YMax",
-                                        "perimeter":"Cell perimeter","area":"Cell area",
-                                        "intensity_mean-1":"Mean PanCK","intensity_max-1":"Max PanCK",
-                                        "intensity_mean-2":"Mean CD45","intensity_max-2":"Max CD45",
-                                        "intensity_mean-3":"Mean CD3","intensity_max-3":"Max CD3",
-                                        "intensity_mean-4":"Mean Membrane","intensity_max-4":"Max Membrane"}).drop(columns=["intensity_mean-0", "intensity_max-0"])
-    # add total counts (exclude CID and FOV, and drop cell_ID = 0, which is the background)
-    cell_metadata["totalcounts"] = t.drop(columns=["cell_ID","fov"]).sum(axis = 1).astype(int)[1:].reset_index(drop=True)
+        # nuclear = resize(im, old_labels.shape, anti_aliasing=True)
+        # nuclear[nuclear !=0] = 1 # binarize again for some reason?? Pixels are float values before this.
 
-    metadata = cell_metadata.merge(nuc_metadata, how="left",on="cell_ID") # add nuclear characteristics
-    metadata["fov"] = int(FOV) # add FOV 
-    
-    global_metadata = pd.concat([global_metadata, metadata])
-    metadata.to_csv(f"../Resegmentation/FOV Metadata/C4_{FOV}_Cyto{CYTOPLASM_DILATION}_metadata.csv", index=False)
+        # label with cell
+        nuc_labels = label(nuclear.astype(np.uint), connectivity=1) # diagonal touching doesn't count
+        dilation_for_cytoplasm = expand_labels(nuc_labels, distance=CYTOPLASM_DILATION)
+
+        tifffile.imwrite(f'{labels_path}/{run}_{FOV}_nuclearLabels.tif', nuc_labels)
+        tifffile.imwrite(f'{labels_path}/{run}_{FOV}_{CYTOPLASM_DILATION}_cellLabels.tif', dilation_for_cytoplasm)
+        # continue
+        
+        # Correct y coord issue
+        ymax = tif.shape[0] # this is the y axis channel  #tx.loc[tx['fov'] == int(FOV), 'y_local_px'].max()
+        # print(ymax)
+        tx.loc[tx['fov']==int(FOV),['y_local_px']] = ymax - tx['y_local_px']
+        # assign transcripts to cell ID
+        new_tx = tx.copy()
+        new_tx['cell_ID'] = dilation_for_cytoplasm[new_tx['y_local_px'].astype(int),new_tx['x_local_px'].astype(int)]
+
+        # collapse and pivot into the counts matrix
+        t = new_tx.loc[new_tx["fov"]==int(FOV)].groupby(by='cell_ID')['target'].value_counts().to_frame().rename(columns = 
+                            {"target":"target_count"}).reset_index().pivot(index="cell_ID",
+                                columns="target", values="target_count").fillna(0)
+        # Locate and add rows for missing cells (cells with no transcripts will not appear in this table and mess up a merge later)
+        missingnos = list(set(np.unique(dilation_for_cytoplasm)).difference(set(t.index))) # find cids missing
+        line = pd.DataFrame(0, index = missingnos, columns = t.columns) # create a frame for the missing cids
+        t = pd.concat([t,line])
+        t = t.sort_index().reset_index().rename(columns={"index":"cell_ID"}) # create a column from the index
+        t["fov"] = f"{FOV}" # Multiple FOVs in an image with duplicate cell_IDs, so must label FOV
+        t["Run_ID"] = run
+        # t.to_csv(f"../Resegmentation/FOV Counts Tables/C4_{FOV}_Cyto{CYTOPLASM_DILATION}_resegmentation_countsTable.csv", index=False)
+        global_counts_table = pd.concat([global_counts_table, t])
+
+        props = ["label", "area", "eccentricity","feret_diameter_max","intensity_mean", "intensity_max", "perimeter","solidity"]
+        nuc_metadata = regionprops_table(nuc_labels,tif[:,:,4], properties = props)
+        nuc_metadata = pd.DataFrame(nuc_metadata).rename(columns={"label":"cell_ID","area":"Nuclear area", "perimeter":"Nuclear perimeter",
+                                                                "intensity_mean":"Mean DAPI","intensity_max":"Max DAPI"}) # only want DAPI intensity in the nucleus
+
+        props = ["label", "area","centroid", "bbox", "intensity_mean", "intensity_max","perimeter"]
+        metadata = regionprops_table(dilation_for_cytoplasm, tif, properties = props)
+
+        cell_metadata = pd.DataFrame(metadata).rename(columns={"label":"cell_ID","centroid-0":"fovX","centroid-1":"fovY",
+                                            "bbox-0":"XMin", "bbox-1":"YMin","bbox-2":"XMax","bbox-3":"YMax",
+                                            "perimeter":"Cell perimeter","area":"Cell area",
+                                            "intensity_mean-1":"Mean PanCK","intensity_max-1":"Max PanCK",
+                                            "intensity_mean-2":"Mean CD45","intensity_max-2":"Max CD45",
+                                            "intensity_mean-3":"Mean CD3","intensity_max-3":"Max CD3",
+                                            "intensity_mean-4":"Mean Membrane","intensity_max-4":"Max Membrane"}).drop(columns=["intensity_mean-0", "intensity_max-0"])
+        # add total counts (exclude CID and FOV, and drop cell_ID = 0, which is the background)
+        cell_metadata["totalcounts"] = t.drop(columns=["cell_ID","fov","Run_ID"]).sum(axis = 1).astype(int)[1:].reset_index(drop=True)
+
+        metadata = cell_metadata.merge(nuc_metadata, how="left",on="cell_ID") # add nuclear characteristics
+        metadata["fov"] = f"{FOV}" # add FOV 
+        metadata["Run_ID"] = run
+        
+        global_metadata = pd.concat([global_metadata, metadata])
+        # metadata.to_csv(f"../Resegmentation/FOV Metadata/C4_{FOV}_Cyto{CYTOPLASM_DILATION}_metadata.csv", index=False)
     # embed()
 
+outpath = os.path.normpath("N:\Imagers\ImageProcessing\Peter\CosMx Resegmentation\Results")
 # Done. Write to file, and embed in case of problem
-global_metadata.to_csv(f"../Resegmentation/C4_allFOV_cyto{CYTOPLASM_DILATION}_metadata.csv", index=False)
-global_counts_table.to_csv(f"../Resegmentation/C4_allFOV_cyto{CYTOPLASM_DILATION}_countsTable.csv", index=False)
+global_metadata.to_csv(f"{outpath}/allRuns_allFOV_cyto{CYTOPLASM_DILATION}_metadata.csv", index=False)
+global_counts_table.to_csv(f"{outpath}/allRuns_allFOV_cyto{CYTOPLASM_DILATION}_countsTable.csv", index=False)
 
 embed()
 # exit()

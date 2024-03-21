@@ -10,8 +10,10 @@ MIN_PANCK_THRESHOLD_NEW = 2100
 
 old_metadata = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\C4_R5042_S1_metadata_file.csv")
 old_counts = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\RawData\C4_R5042_S1_exprMat_file.csv")
-reseg_metadata = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\Resegmentation\C4_allFOV_cyto10_metadata.csv")
-reseg_counts = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CosMx_Data\Resegmentation\C4_allFOV_cyto10_countsTable.csv")
+embed()
+exit()
+reseg_metadata = pd.read_csv(r"N:\Imagers\ImageProcessing\Peter\CosMx Resegmentation\Results\allRuns_allFOV_cyto10_metadata.csv")
+reseg_counts = pd.read_csv(r"N:\Imagers\ImageProcessing\Peter\CosMx Resegmentation\Results\allRuns_allFOV_cyto10_countsTable.csv")
 
 
 reseg_counts = reseg_counts.loc[reseg_counts["cell_ID"] != 0] # get rid of cellID 0 rows (txs not assigned to any cell)
@@ -19,7 +21,7 @@ old_counts = old_counts.loc[old_counts["cell_ID"] != 0]
 
 negprobes_columns = list(reseg_counts.filter(regex="NegPrb").columns)
 krt_columns = list(reseg_counts.filter(regex="KRT").columns)
-reseg_tx_per_cell = reseg_counts.drop(columns=["fov","cell_ID", *negprobes_columns]).sum().sum() / reseg_metadata.shape[0]
+reseg_tx_per_cell = reseg_counts.drop(columns=["Run_ID","fov","cell_ID", *negprobes_columns]).sum().sum() / reseg_metadata.shape[0]
 old_tx_per_cell = old_counts.drop(columns=["fov","cell_ID", *negprobes_columns]).sum().sum() / old_counts.shape[0]
 old_counts["All NegProbes"] = old_counts[negprobes_columns].sum(axis=1)
 reseg_counts["All NegProbes"] = reseg_counts[negprobes_columns].sum(axis=1)
@@ -28,7 +30,7 @@ reseg_counts["All KRT"] = reseg_counts[negprobes_columns].sum(axis=1)
 
 
 # compare All KRT between images
-old_metadata = old_metadata.merge(old_counts[["fov","cell_ID","All KRT","All NegProbes"]], how="left", on=["fov","cell_ID"])
+old_metadata = old_metadata.merge(old_counts[["Run_ID","fov","cell_ID","All KRT","All NegProbes"]], how="left", on=["Run_ID","fov","cell_ID"])
 old_metadata["Cancer?"] = np.where(old_metadata["Mean.PanCK"]>MIN_PANCK_THRESHOLD_OLD, "Cancer", "Other");
 old_metadata["Dataset"] = "Old"
 old_metadata = old_metadata.rename(columns={'Mean.PanCK':'Mean PanCK','Max.PanCK':'Max PanCK',
