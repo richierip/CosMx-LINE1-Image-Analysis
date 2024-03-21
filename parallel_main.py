@@ -910,7 +910,7 @@ def process_fov(tif, root, pipe_out = None, lock = None, run_selection = None, f
     print(f"\nWorking on run {run} : FOV {fov}...")
     # lock.release()
     try:
-        dapi_means = add_counts_for_fov({},run, fov, (cell_mask,compartment_mask), composite_path, meta_path, fov_positions_path, lock)
+        fov_data = add_counts_for_fov({},run, fov, (cell_mask,compartment_mask), composite_path, meta_path, fov_positions_path, lock)
     except FileNotFoundError:
         print(f"{run} fov {fov} does not have a mask available to read. There will be no data from this FOV.")
         if DO_PARALLEL:
@@ -922,13 +922,13 @@ def process_fov(tif, root, pipe_out = None, lock = None, run_selection = None, f
 
     lap_end = time.time() 
     # lock.acquire()
-    print(f"Finished with {run} FOV {fov} in {lap_end-lap_start} seconds. Have data for {len(dapi_means)} nuclei")
+    print(f"Finished with {run} FOV {fov} in {lap_end-lap_start} seconds. Have data for {len(fov_data)} nuclei")
     # lock.release()
 
     if ASSEMBLE:
         start = time.time()
-        print(f"\nAssembling data for {len(dapi_means.keys())} cells in {run}_FOV{fov}... ")
-        df = add_columns(transcripts_path, meta_path, assemble_df(dapi_means))
+        print(f"\nAssembling data for {len(fov_data.keys())} cells in {run}_FOV{fov}... ")
+        df = add_columns(transcripts_path, meta_path, assemble_df(fov_data))
         end = time.time()
         print(f"\nCompleted data assembly for {run}_FOV{fov} in {end-start} seconds.")
     else:
@@ -940,18 +940,16 @@ def process_fov(tif, root, pipe_out = None, lock = None, run_selection = None, f
         return df
 
 def main():
-    # print(f"max value for dapi means is {max(dapi_means.values())}")
-    dapi_means={}
+
     start = time.time()
     readers=[]
     lock = Lock()
     image_validator = compile(r"^(?!Cell.*|Compartment.*).*.(tif|TIF|Tif)")
-    images = []
+    
     output = pd.DataFrame() # will populate with info, row per cell
     for root,dirs,files in os.walk(os.path.normpath("/home/peter/home_projects/CosMx/All Runs")):
         for tif in files:  #[2:8]:
             if image_validator.match(tif) is not None:
-                # images.append(root+'/'+tif)
                 if DO_PARALLEL is True: 
                     print(f'tif is {tif}')
                     r, w = Pipe(duplex=False)
@@ -966,7 +964,7 @@ def main():
                     df = process_fov(tif,root, run_selection = RUN_SELECTION, fov_selection=FOV_SELECTION)
                     # IPython.embed()
                     output = pd.concat([output, df])
-                    # dapi_means.update(fov_dict)
+                    
 
     # wait until everything is done.
     # As data comes in, add it to the appropriate dictionary
@@ -976,7 +974,6 @@ def main():
                 try:
                     df = r.recv()
                     output = pd.concat([output, df])
-                    # dapi_means.update(fov_dict)
                 except EOFError:
                     readers.remove(r)
 

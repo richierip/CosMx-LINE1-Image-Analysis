@@ -202,7 +202,7 @@ cdf = df[df['Cell type'].isin(ctypes)].copy()
 # g.map(sns.kdeplot, "Solidity", "Eccentricity", fill  = True)
 
 # #--------------- try a barplot with solidity cutoff
-
+IPython.embed()
 # cdf["Solidity_high_low"] = np.where(cdf['Solidity'] > 0.87, "Solidity High","Solidity Low")
 # b = sns.barplot(data = cdf, x = 'Cell type', y = 'Line1_combined', hue ='Solidity_high_low')
 # cap = "Line1 by cell type, colored by Solidity"
